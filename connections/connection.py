@@ -35,6 +35,16 @@ class Connection(abc.ABC):
   Layer 2 APIs depend only on this interface.
   """
 
+  @property
+  def is_idle(self) -> bool:
+    """Returns True if the connection is idle and ready for input."""
+    return True
+
+  @property
+  def conversation_id(self) -> str:
+    """Returns the conversation identifier, if one exists."""
+    return ""
+
   @abc.abstractmethod
   async def send(self, prompt: str, **kwargs: Any) -> None:
     """Sends a prompt to the agent.

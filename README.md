@@ -44,7 +44,9 @@ async with Agent(api_key="GEMINI_API_KEY", read_only=False) as agent:
 ### Advanced Usage with Conversation
 
 For full control over the connection lifecycle, use `Conversation` with a
-`ConnectionStrategy` directly:
+`ConnectionStrategy` directly. `Conversation` is a stateful session that
+accumulates step history, provides a `chat()` convenience method, and exposes
+state introspection:
 
 ```python
 import asyncio
@@ -60,14 +62,22 @@ async def main():
         tool_runner=tool_runner,
         gemini_config=GeminiConfig(api_key="GEMINI_API_KEY"),
     )
-    conversation = await Conversation.create(strategy)
 
-    await conversation.send("Hello!")
-    async for step in conversation.receive_steps():
-        if step.is_final_response:
-            print(step.content)
+    async with Conversation.create(strategy) as conversation:
+        # High-level: one-call send + collect
+        response = await conversation.chat("What files are here?")
+        print(response.text)
 
-    await strategy.stop()
+        # Step history accumulates automatically
+        print(f"Total steps: {len(conversation.history)}")
+        print(f"Turns: {conversation.turn_count}")
+        print(f"Last response: {conversation.last_response}")
+
+        # Low-level: streaming steps
+        await conversation.send("Tell me more.")
+        async for step in conversation.receive_steps():
+            if step.is_final_response:
+                print(step.content)
 
 asyncio.run(main())
 ```
@@ -139,8 +149,8 @@ The SDK follows a three-layer architecture:
 
 | Layer | Purpose | Key Classes |
 |:------|:--------|:------------|
-| **Layer 1** — Simplified | High-level, easy-to-use entry point | `Agent`, `Conversation` |
-| **Layer 2** — Core SDK | Full power for advanced users | `Step`, `ToolCall`, `HookRunner`, `ToolRunner`, `TriggerRunner` |
+| **Layer 1** — Simplified | High-level, batteries-included entry point | `Agent` |
+| **Layer 2** — Session | Stateful session with history and convenience methods | `Conversation`, `ChatResponse`, `Step`, `ToolCall`, `HookRunner`, `ToolRunner`, `TriggerRunner` |
 | **Layer 3** — Adapter | Transport and backend abstraction | `Connection`, `ConnectionStrategy`, `LocalConnection` |
 
 ## Examples

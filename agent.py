@@ -18,8 +18,6 @@ import asyncio
 import logging
 from typing import Any, Callable
 
-import pydantic
-
 from google.antigravity import types
 from google.antigravity.connections import local_connection
 from google.antigravity.connections.local_connection import LocalConnectionStrategy
@@ -32,13 +30,6 @@ from google.antigravity.mcp import bridge
 from google.antigravity.tools import tool_runner
 from google.antigravity.triggers import trigger_runner
 from google.antigravity.triggers import triggers as triggers_lib
-
-
-class ChatResponse(pydantic.BaseModel):
-  """Response from Agent.chat containing the text and execution steps."""
-
-  text: str
-  steps: list[types.Step]
 
 
 class Agent:
@@ -199,7 +190,7 @@ class Agent:
       if self._pending_triggers:
         logging.info("Registering triggers...")
         for trigger in self._pending_triggers:
-          self._conversation._connection.register_trigger(trigger)
+          self._conversation.register_trigger(trigger)
         self._pending_triggers.clear()
 
       return self
@@ -216,23 +207,13 @@ class Agent:
     if self._conversation_cm:
       await self._conversation_cm.__aexit__(exc_type, exc_val, exc_tb)
 
-  async def chat(self, prompt: str) -> ChatResponse:
+  async def chat(self, prompt: str) -> types.ChatResponse:
     """Sends a prompt and returns the final response."""
     if not self._conversation:
       raise RuntimeError(
           "Agent session not started. Use 'async with Agent(...)'."
       )
-
-    await self._conversation.send(prompt)
-
-    final_response = ""
-    steps = []
-    async for step in self._conversation.receive_steps():
-      steps.append(step)
-      if step.is_final_response:
-        final_response = step.content
-
-    return ChatResponse(text=final_response, steps=steps)
+    return await self._conversation.chat(prompt)
 
   async def run_interactive_loop(self):
     """Runs an interactive CLI loop."""

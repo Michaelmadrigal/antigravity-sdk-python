@@ -272,6 +272,16 @@ class LocalConnection(connection.Connection):
     if self._hook_runner and self._hook_runner.on_session_start_hooks:
       self._run_in_background(self._hook_runner.dispatch_session_start())
 
+  @property
+  def is_idle(self) -> bool:
+    """Returns True if the connection is idle and ready for input."""
+    return self._is_idle.is_set()
+
+  @property
+  def conversation_id(self) -> str:
+    """Returns the conversation identifier, if one exists."""
+    return self._cascade_id or ""
+
   async def send(self, prompt: str) -> None:
     """Sends a prompt to the agent."""
     self._cancelled = False

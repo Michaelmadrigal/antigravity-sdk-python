@@ -458,3 +458,20 @@ class FileChange(pydantic.BaseModel):
 
   kind: FileChangeKind
   path: str
+
+
+# =============================================================================
+# Response types
+# =============================================================================
+
+
+class ChatResponse(pydantic.BaseModel):
+  """Response from a chat interaction containing the text and execution steps.
+
+  Attributes:
+    text: The final model response text.
+    steps: All steps received during the interaction.
+  """
+
+  text: str
+  steps: list[Step]

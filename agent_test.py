@@ -59,16 +59,18 @@ class AgentTest(unittest.IsolatedAsyncioTestCase):
     mock_cm.__aenter__.return_value = mock_conversation
     mock_conv_create.return_value = mock_cm
 
-    async def mock_receive_steps():
-      yield types.Step(is_final_response=True, content="Hello back")
-
-    mock_conversation.receive_steps.return_value = mock_receive_steps()
+    mock_conversation.chat = mock.AsyncMock(
+        return_value=types.ChatResponse(
+            text="Hello back",
+            steps=[types.Step(is_final_response=True, content="Hello back")],
+        )
+    )
 
     async with agent.Agent(system_instructions="test") as ag:
       response = await ag.chat("Hello")
       self.assertEqual(response.text, "Hello back")
       self.assertEqual(len(response.steps), 1)
-      mock_conversation.send.assert_called_once_with("Hello")
+      mock_conversation.chat.assert_called_once_with("Hello")
 
   @mock.patch(
       "google.antigravity.agent."
@@ -158,7 +160,6 @@ class AgentTest(unittest.IsolatedAsyncioTestCase):
     mock_strategy_class.return_value = mock_strategy_instance
 
     mock_conversation = mock.MagicMock(spec=conversation.Conversation)
-    mock_conversation._connection = mock.MagicMock()
 
     mock_cm = mock.AsyncMock()
     mock_cm.__aenter__.return_value = mock_conversation
@@ -170,19 +171,15 @@ class AgentTest(unittest.IsolatedAsyncioTestCase):
 
     # Test constructor registration
     async with agent.Agent(system_instructions="test", triggers=[my_trigger]):
-      mock_conversation._connection.register_trigger.assert_called_once_with(
-          my_trigger
-      )
+      mock_conversation.register_trigger.assert_called_once_with(my_trigger)
 
-    mock_conversation._connection.register_trigger.reset_mock()
+    mock_conversation.register_trigger.reset_mock()
 
     # Test dynamic registration
     ag = agent.Agent(system_instructions="test")
     ag.register_trigger(my_trigger)
     async with ag:
-      mock_conversation._connection.register_trigger.assert_called_once_with(
-          my_trigger
-      )
+      mock_conversation.register_trigger.assert_called_once_with(my_trigger)
 
   @mock.patch(
       "google.antigravity.agent."

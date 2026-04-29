@@ -12,24 +12,55 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Conversation wrapper for Antigravity SDK."""
+"""Stateful conversation session for the Antigravity SDK.
+
+Conversation is the Layer 2 session API. It wraps a Connection with:
+- Step history accumulation (with compaction index tracking)
+- A chat() convenience method (send + collect in one call)
+- Trigger registration surface
+- State introspection (idle, turn count, last response)
+
+Layer 1 (Agent) delegates to Conversation; power users can use
+Conversation directly with any ConnectionStrategy.
+"""
 
 import contextlib
-from typing import Any, AsyncIterator
+from typing import Any, AsyncIterator, Callable
 
 from google.antigravity import types
 from google.antigravity.connections import connection
 
 
+# Default maximum number of steps to retain in history.
+_DEFAULT_MAX_HISTORY_SIZE = 10_000
+
+
 class Conversation:
-  """Wrapper around a single conversation with the agent."""
+  """Stateful session wrapping a single conversation with the agent.
+
+  Accumulates step history, tracks turn start indices and compaction indices,
+  and provides convenience methods for common send/receive patterns.
+  """
 
   def __init__(
       self,
       conn: connection.Connection,
+      *,
+      max_history_size: int = _DEFAULT_MAX_HISTORY_SIZE,
   ):
-    """Initializes the conversation wrapper with a connection strategy."""
+    """Initializes the conversation with a connection and empty history.
+
+    Args:
+      conn: The established connection to the agent backend.
+      max_history_size: Maximum number of steps to retain in history.
+        When exceeded, the oldest steps are discarded. Set to 0 to
+        disable the limit.
+    """
     self._connection = conn
+    self._steps: list[types.Step] = []
+    self._turn_start_indices: list[int] = []
+    self._compaction_indices: list[int] = []
+    self._max_history_size = max_history_size
 
   @classmethod
   @contextlib.asynccontextmanager
@@ -45,61 +76,182 @@ class Conversation:
     async with strategy:
       yield cls(strategy.connect())
 
+  # ---------------------------------------------------------------------------
+  # Core send / receive
+  # ---------------------------------------------------------------------------
+
   async def send(
       self,
       prompt: str | None,
       **kwargs: Any,
   ) -> None:
-    """Sends a message to the agent."""
+    """Sends a message to the agent.
+
+    Records a turn boundary in the history before sending.
+
+    Args:
+      prompt: The user message to send.
+      **kwargs: Strategy-specific options.
+    """
     await self.wait_for_idle()
+    self._turn_start_indices.append(len(self._steps))
     await self._connection.send(prompt, **kwargs)
 
   async def receive_steps(self) -> AsyncIterator[types.Step]:
     """Receives steps as they complete, blocks until execution is idle.
 
-    Yields steps from the underlying connection. The iterator exits once
+    Steps are recorded in history as they arrive. The iterator exits once
     the execution turn is complete.
 
     Yields:
       Steps as they complete.
     """
     async for step in self._connection.receive_steps():
+      self._steps.append(step)
+      if step.type == types.StepType.COMPACTION:
+        self._compaction_indices.append(len(self._steps) - 1)
+      self._enforce_max_history()
       yield step
 
-  async def cancel(self) -> None:
-    """Cancels the current turn."""
-    if hasattr(self._connection, "cancel"):
-      await self._connection.cancel()
+  async def chat(self, prompt: str) -> types.ChatResponse:
+    """Sends a prompt and returns the complete response.
 
-  async def delete(self) -> None:
-    """Deletes this conversation from the backend."""
-    if hasattr(self._connection, "delete"):
-      await self._connection.delete()
+    This is a convenience wrapper around send() + receive_steps() that
+    collects all steps and extracts the final model response.
 
-  async def signal_idle(self) -> None:
-    """Signals that the conversation is ready to receive input."""
-    if hasattr(self._connection, "signal_idle"):
-      await self._connection.signal_idle()
+    Args:
+      prompt: The user message to send.
 
-  async def wait_for_idle(self) -> None:
-    """Blocks until the conversation is idle."""
-    if hasattr(self._connection, "wait_for_idle"):
-      await self._connection.wait_for_idle()
+    Returns:
+      A ChatResponse with the final text and all steps.
+    """
+    await self.send(prompt)
+    steps = []
+    final_response = ""
+    async for step in self.receive_steps():
+      steps.append(step)
+      if step.is_final_response:
+        final_response = step.content
+    return types.ChatResponse(text=final_response, steps=steps)
 
-  async def wait_for_wakeup(self, timeout: float = 300.0) -> bool:
-    """Blocks until the conversation wakes up."""
-    if hasattr(self._connection, "wait_for_wakeup"):
-      return await self._connection.wait_for_wakeup(timeout)
-    return False
+  # ---------------------------------------------------------------------------
+  # History and state
+  # ---------------------------------------------------------------------------
 
-  async def disconnect(self) -> None:
-    """Disconnect the conversation's background stream."""
-    if hasattr(self._connection, "disconnect"):
-      await self._connection.disconnect()
+  @property
+  def history(self) -> list[types.Step]:
+    """Returns all steps received across all turns.
+
+    This is the full, uncompacted transcript. Use compaction_indices to
+    identify where the model's context window was compacted.
+    """
+    return list(self._steps)
+
+  @property
+  def last_response(self) -> str:
+    """Returns the content of the most recent final model response."""
+    for step in reversed(self._steps):
+      if step.is_final_response:
+        return step.content
+    return ""
+
+  @property
+  def turn_count(self) -> int:
+    """Returns the number of send() calls made on this conversation."""
+    return len(self._turn_start_indices)
+
+  @property
+  def compaction_indices(self) -> list[int]:
+    """Step indices where the model's context was compacted.
+
+    Each index corresponds to the position of a compaction step in
+    the history list. Steps before these indices may no longer be in
+    the model's context window, but remain in the full history for
+    transcript and debugging.
+    """
+    return list(self._compaction_indices)
+
+  def clear_history(self) -> None:
+    """Clears the accumulated step history, turn indices, and compaction indices.
+
+    Use this to free memory during long-running sessions. The conversation
+    remains active — only the recorded history is discarded.
+    """
+    self._steps.clear()
+    self._turn_start_indices.clear()
+    self._compaction_indices.clear()
+
+  def _enforce_max_history(self) -> None:
+    """Trims history to max_history_size if a limit is set."""
+    if self._max_history_size and len(self._steps) > self._max_history_size:
+      overflow = len(self._steps) - self._max_history_size
+      self._steps = self._steps[overflow:]
+      # Adjust indices to account for removed steps.
+      self._turn_start_indices = [
+          i - overflow
+          for i in self._turn_start_indices
+          if i >= overflow
+      ]
+      self._compaction_indices = [
+          i - overflow
+          for i in self._compaction_indices
+          if i >= overflow
+      ]
+
+  @property
+  def is_idle(self) -> bool:
+    """Returns True if the conversation is idle and ready for input."""
+    return self._connection.is_idle
 
   @property
   def conversation_id(self) -> str:
-    """Returns the ID of the background conversation if one exists."""
-    if hasattr(self._connection, "_conversation_id"):
-      return self._connection._conversation_id  # pylint: disable=protected-access
-    return ""
+    """Returns the conversation identifier, if one exists."""
+    return self._connection.conversation_id
+
+  # ---------------------------------------------------------------------------
+  # Lifecycle
+  # ---------------------------------------------------------------------------
+
+  async def cancel(self) -> None:
+    """Cancels the current turn."""
+    await self._connection.cancel()
+
+  async def delete(self) -> None:
+    """Deletes this conversation from the backend."""
+    await self._connection.delete()
+
+  async def signal_idle(self) -> None:
+    """Signals that the conversation is ready to receive input."""
+    await self._connection.signal_idle()
+
+  async def wait_for_idle(self) -> None:
+    """Blocks until the conversation is idle."""
+    await self._connection.wait_for_idle()
+
+  async def wait_for_wakeup(self, timeout: float = 300.0) -> bool:
+    """Blocks until the conversation wakes up.
+
+    Args:
+      timeout: Maximum seconds to wait.
+
+    Returns:
+      True if the conversation woke up, False on timeout.
+    """
+    return await self._connection.wait_for_wakeup(timeout)
+
+  async def disconnect(self) -> None:
+    """Disconnect the conversation's background stream."""
+    await self._connection.disconnect()
+
+  # ---------------------------------------------------------------------------
+  # Triggers
+  # ---------------------------------------------------------------------------
+
+  def register_trigger(self, trigger: Callable[..., Any]) -> None:
+    """Registers a trigger with the underlying connection.
+
+    Args:
+      trigger: The trigger function to register. Must be an async function
+        accepting a TriggerContext.
+    """
+    self._connection.register_trigger(trigger)
