@@ -266,8 +266,8 @@ The implementation is split across the following core files:
     and the specialized hook interfaces (e.g., `PreToolCallDecideHook`).
 -   **`hook_runner.py`**: Implements the `HookRunner` class, which manages the
     hook collections and implements the strict execution order dispatch logic.
--   **`cli.py`**: Provides concrete implementations of hooks for interactive CLI
-    usage, such as `ToolConfirmationHook` and `AskQuestionHook`.
+-   **`utils/interactive.py`** (SDK root): Provides concrete implementations of hooks for
+    interactive CLI usage, such as `ToolConfirmationHook` and `AskQuestionHook`.
 -   **`policy.py`**: Declarative tool call policy system with priority-based
     evaluation. Produces a `PreToolCallDecideHook` from a list of policies.
 
@@ -278,7 +278,7 @@ Comprehensive unit tests are provided in:
 -   **`hooks_test.py`**: Verifies base class behavior.
 -   **`hook_runner_test.py`**: Verifies execution order, context scoping,
     fail-closed behavior, and streaming dispatch.
--   **`cli_test.py`**: Verifies interactive CLI hooks.
+-   **`utils/interactive_test.py`**: Verifies interactive CLI hooks.
 -   **`policy_test.py`**: Verifies priority evaluation, short-circuiting,
     predicate handling, ASK_USER handlers, and HookRunner integration.
 

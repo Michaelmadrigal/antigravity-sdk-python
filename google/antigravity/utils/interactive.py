@@ -12,18 +12,36 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Builtin CLI hooks for interactive and policy-governed agent execution.
+"""Interactive CLI utilities for agent debugging and development.
 
-This module provides ready-to-use hooks for asking the user for confirmation
-before executing tools and for answering multiple-choice or write-in questions.
+This module provides stdin-based interactive utilities for running agents
+in a terminal. These are intended for local development and debugging,
+not for production use.
+
+Includes:
+
+- ``run_interactive_loop``: A REPL that reads user input, sends it to the
+  agent, and prints responses.
+- ``ToolConfirmationHook``: A hook that prompts the user for confirmation
+  before executing a tool call.
+- ``AskQuestionHook``: A hook that prompts the user to answer questions
+  asked by the agent.
+- ``ask_user_handler``: A policy handler that prompts the user for
+  confirmation before executing a tool call.
 """
 
+from __future__ import annotations
+
 import asyncio
-from typing import Any
+import logging
+from typing import TYPE_CHECKING
 
 from google.antigravity import types
 from google.antigravity.hooks import hooks
 from google.antigravity.types import QuestionResponse
+
+if TYPE_CHECKING:
+  from google.antigravity import agent as agent_module
 
 
 class ToolConfirmationHook(hooks.PreToolCallDecideHook):
@@ -129,9 +147,7 @@ class AskQuestionHook(hooks.OnInteractionHook):
                 break
 
         if matched_id:
-          responses.append(
-              QuestionResponse(selected_option_ids=[matched_id])
-          )
+          responses.append(QuestionResponse(selected_option_ids=[matched_id]))
         else:
           responses.append(QuestionResponse(freeform_response=ans))
 
@@ -139,3 +155,51 @@ class AskQuestionHook(hooks.OnInteractionHook):
       return hooks.QuestionHookResult(responses=responses, cancelled=True)
 
     return hooks.QuestionHookResult(responses=responses)
+
+
+async def run_interactive_loop(agent: agent_module.Agent) -> None:
+  """Runs an interactive CLI loop for debugging and development.
+
+  Reads user input from stdin, sends it to the agent, and prints the
+  agent's responses. Registers an ``AskQuestionHook`` so the agent can
+  prompt the user with questions during execution.
+
+  Type ``exit`` or ``quit`` to end the session. Ctrl+C also exits cleanly.
+
+  Args:
+    agent: A started Agent instance (inside an ``async with`` block).
+
+  Raises:
+    RuntimeError: If the agent session has not been started.
+  """
+  if not agent.is_started:
+    raise RuntimeError(
+        "Agent session not started. Use 'async with Agent(...)'."
+    )
+
+  assert agent._conversation is not None
+
+  agent.register_hook(AskQuestionHook())
+  print("Starting interactive loop. Type 'exit' or 'quit' to end.")
+  while True:
+    try:
+      user_input = await asyncio.to_thread(input, "User: ")
+      user_input = user_input.strip()
+      if not user_input:
+        continue
+      if user_input.lower() in ("exit", "quit"):
+        print("Goodbye!")
+        break
+
+      await agent._conversation.send(user_input)
+
+      async for step in agent._conversation.receive_steps():
+        if step.is_complete_response:
+          print(f"Agent: {step.content}")
+
+    except (KeyboardInterrupt, EOFError):
+      print("\nGoodbye!")
+      break
+    except Exception as e:  # pylint: disable=broad-exception-caught
+      logging.exception("Error in interactive loop: %s", e)
+      print(f"Error: {e}")

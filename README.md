@@ -87,6 +87,7 @@ By default, `Agent` runs in **read-only mode** for safety. Pass
 
 ```python
 from google.antigravity import Agent, LocalAgentConfig, CapabilitiesConfig
+from google.antigravity.utils.interactive import run_interactive_loop
 
 config = LocalAgentConfig(
     system_instructions="You are a helpful assistant.",
@@ -94,7 +95,7 @@ config = LocalAgentConfig(
     capabilities=CapabilitiesConfig(),
 )
 async with Agent(config) as agent:
-    await agent.run_interactive_loop()
+    await run_interactive_loop(agent)
 ```
 
 ### Advanced Usage with Conversation
@@ -212,6 +213,7 @@ Control agent behavior with a declarative policy system:
 ```python
 from google.antigravity import Agent, LocalAgentConfig, CapabilitiesConfig
 from google.antigravity.hooks.policy import deny, allow, ask_user, enforce
+from google.antigravity.utils.interactive import run_interactive_loop
 
 policies = [
     deny("*"),                          # Block all tools by default
@@ -225,7 +227,7 @@ config = LocalAgentConfig(
     policies=policies,
 )
 async with Agent(config) as agent:
-    await agent.run_interactive_loop()
+    await run_interactive_loop(agent)
 ```
 
 ### Triggers
@@ -236,6 +238,7 @@ agent:
 ```python
 from google.antigravity import Agent, LocalAgentConfig
 from google.antigravity.triggers import every
+from google.antigravity.utils.interactive import run_interactive_loop
 
 async def check_status(ctx):
     await ctx.send("Check the deployment status.")
@@ -245,7 +248,7 @@ config = LocalAgentConfig(
     triggers=[every(60, check_status)],
 )
 async with Agent(config) as agent:
-    await agent.run_interactive_loop()
+    await run_interactive_loop(agent)
 ```
 
 ## Architecture

@@ -12,18 +12,22 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Tests for builtin CLI hooks."""
+"""Tests for interactive CLI utilities."""
 
 import asyncio
 import unittest
 from unittest import mock
 
+from google.antigravity import agent
 from google.antigravity import types
-from google.antigravity.hooks import cli
+from google.antigravity.connections import local as local_connection
+from google.antigravity.conversation import conversation
 from google.antigravity.hooks import hooks
+from google.antigravity.utils import interactive
 
 
-class CliHooksTest(unittest.TestCase):
+class ToolConfirmationHookTest(unittest.TestCase):
+  """Tests for ToolConfirmationHook."""
 
   def setUp(self):
     super().setUp()
@@ -48,7 +52,7 @@ class CliHooksTest(unittest.TestCase):
       mock_input: The patched builtins.input function.
     """
     mock_input.return_value = "y"
-    hook = cli.ToolConfirmationHook()
+    hook = interactive.ToolConfirmationHook()
     tool_call = types.ToolCall(name="test_tool", args={"foo": "bar"})
     res = self.loop.run_until_complete(hook.run(self.ctx, tool_call))
     self.assertTrue(res.allow)
@@ -65,7 +69,7 @@ class CliHooksTest(unittest.TestCase):
       mock_input: The patched builtins.input function.
     """
     mock_input.return_value = "n"
-    hook = cli.ToolConfirmationHook()
+    hook = interactive.ToolConfirmationHook()
     tool_call = types.ToolCall(name="test_tool", args={})
     res = self.loop.run_until_complete(hook.run(self.ctx, tool_call))
     self.assertFalse(res.allow)
@@ -83,16 +87,30 @@ class CliHooksTest(unittest.TestCase):
       mock_input: The patched builtins.input function.
     """
     mock_input.side_effect = EOFError
-    hook = cli.ToolConfirmationHook()
+    hook = interactive.ToolConfirmationHook()
     tool_call = types.ToolCall(name="test_tool", args={})
     res = self.loop.run_until_complete(hook.run(self.ctx, tool_call))
     self.assertFalse(res.allow)
+
+
+class AskQuestionHookTest(unittest.TestCase):
+  """Tests for AskQuestionHook."""
+
+  def setUp(self):
+    super().setUp()
+    self.loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(self.loop)
+
+  def tearDown(self):
+    super().tearDown()
+    self.loop.close()
+    asyncio.set_event_loop(None)
 
   @mock.patch("builtins.input")
   def test_ask_question_hook_option_number(self, mock_input):
     """Verifies that the user can select an option by its index."""
     mock_input.return_value = "1"
-    hook = cli.AskQuestionHook()
+    hook = interactive.AskQuestionHook()
     q = types.AskQuestionEntry(
         question="Choose?",
         options=[
@@ -112,7 +130,7 @@ class CliHooksTest(unittest.TestCase):
   def test_ask_question_hook_option_text(self, mock_input):
     """Verifies that the user can select an option by its exact text."""
     mock_input.return_value = "Option 2"
-    hook = cli.AskQuestionHook()
+    hook = interactive.AskQuestionHook()
     q = types.AskQuestionEntry(
         question="Choose?",
         options=[
@@ -132,7 +150,7 @@ class CliHooksTest(unittest.TestCase):
   def test_ask_question_hook_write_in(self, mock_input):
     """Verifies that the user can provide a write-in response."""
     mock_input.return_value = "custom answer"
-    hook = cli.AskQuestionHook()
+    hook = interactive.AskQuestionHook()
     q = types.AskQuestionEntry(question="What?", options=[])
     spec = types.AskQuestionInteractionSpec(questions=[q])
     session_ctx = hooks.SessionContext()
@@ -146,7 +164,7 @@ class CliHooksTest(unittest.TestCase):
   def test_ask_question_hook_skip(self, mock_input):
     """Verifies that the user can skip a question by providing empty input."""
     mock_input.return_value = ""
-    hook = cli.AskQuestionHook()
+    hook = interactive.AskQuestionHook()
     q = types.AskQuestionEntry(question="What?", options=[])
     spec = types.AskQuestionInteractionSpec(questions=[q])
     session_ctx = hooks.SessionContext()
@@ -158,9 +176,9 @@ class CliHooksTest(unittest.TestCase):
 
   @mock.patch("builtins.input")
   def test_ask_question_hook_eof(self, mock_input):
-    """Verifies that EOFError results in a skipped question."""
+    """Verifies that EOFError results in a cancelled response."""
     mock_input.side_effect = EOFError
-    hook = cli.AskQuestionHook()
+    hook = interactive.AskQuestionHook()
     q = types.AskQuestionEntry(question="What?", options=[])
     spec = types.AskQuestionInteractionSpec(questions=[q])
     session_ctx = hooks.SessionContext()
@@ -172,6 +190,7 @@ class CliHooksTest(unittest.TestCase):
 
 
 class AskUserHandlerTest(unittest.TestCase):
+  """Tests for ask_user_handler."""
 
   def setUp(self):
     super().setUp()
@@ -188,7 +207,7 @@ class AskUserHandlerTest(unittest.TestCase):
     """Verifies that the handler returns True when the user confirms."""
     mock_input.return_value = "y"
     tc = types.ToolCall(name="test_tool", args={"key": "val"})
-    result = self.loop.run_until_complete(cli.ask_user_handler(tc))
+    result = self.loop.run_until_complete(interactive.ask_user_handler(tc))
     self.assertTrue(result)
 
   @mock.patch("builtins.input")
@@ -196,7 +215,7 @@ class AskUserHandlerTest(unittest.TestCase):
     """Verifies that the handler returns False when the user declines."""
     mock_input.return_value = "n"
     tc = types.ToolCall(name="test_tool", args={})
-    result = self.loop.run_until_complete(cli.ask_user_handler(tc))
+    result = self.loop.run_until_complete(interactive.ask_user_handler(tc))
     self.assertFalse(result)
 
   @mock.patch("builtins.input")
@@ -204,8 +223,128 @@ class AskUserHandlerTest(unittest.TestCase):
     """Verifies that the handler returns False on EOFError."""
     mock_input.side_effect = EOFError
     tc = types.ToolCall(name="test_tool", args={})
-    result = self.loop.run_until_complete(cli.ask_user_handler(tc))
+    result = self.loop.run_until_complete(interactive.ask_user_handler(tc))
     self.assertFalse(result)
+
+
+class RunInteractiveLoopTest(unittest.IsolatedAsyncioTestCase):
+  """Tests for run_interactive_loop."""
+
+  async def test_run_interactive_loop_before_start(self):
+    """Verifies RuntimeError when agent session is not started.
+
+    What: Calls run_interactive_loop on an unstarted agent.
+    Why: The function requires a live conversation to operate.
+    How: Asserts RuntimeError is raised with an informative message.
+    """
+    ag = agent.Agent(
+        local_connection.LocalAgentConfig(system_instructions="test")
+    )
+    with self.assertRaises(RuntimeError):
+      await interactive.run_interactive_loop(ag)
+
+  @mock.patch(
+      "google.antigravity.connections."
+      "local.local_connection.LocalConnectionStrategy"
+  )
+  @mock.patch.object(conversation.Conversation, "create")
+  @mock.patch("asyncio.to_thread")
+  async def test_run_interactive_loop(
+      self, mock_to_thread, mock_conv_create, mock_strategy_class
+  ):
+    """Verifies the basic interactive loop flow.
+
+    What: Simulates empty input, a valid prompt, and 'exit'.
+    Why: Ensures the loop correctly skips blanks, sends prompts,
+         prints responses, and exits on 'exit'.
+    How: Mocks asyncio.to_thread (stdin) and conversation methods,
+         then asserts send was called and output was printed.
+    """
+    mock_strategy_instance = mock.MagicMock()
+    mock_strategy_instance.stop = mock.AsyncMock()
+    mock_strategy_class.return_value = mock_strategy_instance
+
+    mock_conversation = mock.MagicMock(spec=conversation.Conversation)
+    mock_conversation._connection = mock.MagicMock()
+    mock_conversation.send = mock.AsyncMock()
+
+    async def mock_receive_steps():
+      yield types.Step(is_complete_response=True, content="Agent response")
+
+    mock_conversation.receive_steps = mock_receive_steps
+
+    mock_cm = mock.AsyncMock()
+    mock_cm.__aenter__.return_value = mock_conversation
+    mock_conv_create.return_value = mock_cm
+
+    # Mock input to return '', 'hello' then 'exit'
+    mock_to_thread.side_effect = ["", "hello", "exit"]
+
+    config = local_connection.LocalAgentConfig(system_instructions="test")
+    async with agent.Agent(config) as ag:
+      with mock.patch("builtins.print") as mock_print:
+        await interactive.run_interactive_loop(ag)
+
+    mock_conversation.send.assert_called_once_with("hello")
+    mock_print.assert_any_call("Agent: Agent response")
+
+  @mock.patch(
+      "google.antigravity.connections."
+      "local.local_connection.LocalConnectionStrategy"
+  )
+  @mock.patch.object(conversation.Conversation, "create")
+  @mock.patch("asyncio.to_thread")
+  async def test_run_interactive_loop_interrupt(
+      self, mock_to_thread, mock_conv_create, mock_strategy_class
+  ):
+    """Verifies clean exit on KeyboardInterrupt.
+
+    What: Simulates Ctrl+C during input.
+    Why: Ensures graceful shutdown without traceback.
+    How: Asserts 'Goodbye!' is printed after KeyboardInterrupt.
+    """
+    del mock_conv_create  # Unused.
+    mock_strategy_instance = mock.MagicMock()
+    mock_strategy_instance.stop = mock.AsyncMock()
+    mock_strategy_class.return_value = mock_strategy_instance
+
+    mock_to_thread.side_effect = KeyboardInterrupt()
+
+    config = local_connection.LocalAgentConfig(system_instructions="test")
+    async with agent.Agent(config) as ag:
+      with mock.patch("builtins.print") as mock_print:
+        await interactive.run_interactive_loop(ag)
+
+    mock_print.assert_any_call("\nGoodbye!")
+
+  @mock.patch(
+      "google.antigravity.connections."
+      "local.local_connection.LocalConnectionStrategy"
+  )
+  @mock.patch.object(conversation.Conversation, "create")
+  @mock.patch("asyncio.to_thread")
+  async def test_run_interactive_loop_exception(
+      self, mock_to_thread, mock_conv_create, mock_strategy_class
+  ):
+    """Verifies error handling in the interactive loop.
+
+    What: Simulates an exception during input, followed by 'exit'.
+    Why: Ensures errors are logged and printed, and the loop continues.
+    How: Asserts the error message is printed and the loop exits cleanly.
+    """
+    del mock_conv_create  # Unused.
+    mock_strategy_instance = mock.MagicMock()
+    mock_strategy_instance.stop = mock.AsyncMock()
+    mock_strategy_class.return_value = mock_strategy_instance
+
+    mock_to_thread.side_effect = [ValueError("Fail"), "exit"]
+
+    config = local_connection.LocalAgentConfig(system_instructions="test")
+    async with agent.Agent(config) as ag:
+      with mock.patch("builtins.print") as mock_print:
+        await interactive.run_interactive_loop(ag)
+
+    mock_print.assert_any_call("Error: Fail")
 
 
 if __name__ == "__main__":

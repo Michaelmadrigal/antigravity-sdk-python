@@ -581,12 +581,30 @@ class AgentTest(unittest.IsolatedAsyncioTestCase):
     with self.assertRaises(RuntimeError):
       _ = ag.connection
 
-  async def test_agent_run_interactive_loop_before_start(self):
+  async def test_agent_is_started_before_start(self):
+    """Verifies is_started returns False before session starts."""
     ag = agent.Agent(
         local_connection.LocalAgentConfig(system_instructions="test")
     )
-    with self.assertRaises(RuntimeError):
-      await ag.run_interactive_loop()
+    self.assertFalse(ag.is_started)
+
+  @mock.patch(
+      "google.antigravity.connections."
+      "local.local_connection.LocalConnectionStrategy"
+  )
+  @mock.patch.object(conversation.Conversation, "create")
+  async def test_agent_is_started_after_start(
+      self, mock_conv_create, mock_strategy_class
+  ):
+    """Verifies is_started returns True inside async with."""
+    del mock_conv_create  # Unused.
+    mock_strategy_instance = mock.MagicMock()
+    mock_strategy_instance.stop = mock.AsyncMock()
+    mock_strategy_class.return_value = mock_strategy_instance
+
+    config = local_connection.LocalAgentConfig(system_instructions="test")
+    async with agent.Agent(config) as ag:
+      self.assertTrue(ag.is_started)
 
   @mock.patch(
       "google.antigravity.connections."
@@ -755,90 +773,6 @@ class AgentTest(unittest.IsolatedAsyncioTestCase):
       self.assertEqual(tool_runner_instance.tools["mock_tool"], mock_tool)
 
     mock_bridge_instance.stop.assert_called_once()
-
-  @mock.patch(
-      "google.antigravity.connections."
-      "local.local_connection.LocalConnectionStrategy"
-  )
-  @mock.patch.object(conversation.Conversation, "create")
-  @mock.patch("asyncio.to_thread")
-  async def test_agent_run_interactive_loop(
-      self, mock_to_thread, mock_conv_create, mock_strategy_class
-  ):
-    mock_strategy_instance = mock.MagicMock()
-
-    mock_strategy_instance.stop = mock.AsyncMock()
-    mock_strategy_class.return_value = mock_strategy_instance
-
-    mock_conversation = mock.MagicMock(spec=conversation.Conversation)
-    mock_conversation._connection = mock.MagicMock()
-    mock_conversation.send = mock.AsyncMock()
-
-    async def mock_receive_steps():
-      yield types.Step(is_complete_response=True, content="Agent response")
-
-    mock_conversation.receive_steps = mock_receive_steps
-
-    mock_cm = mock.AsyncMock()
-    mock_cm.__aenter__.return_value = mock_conversation
-    mock_conv_create.return_value = mock_cm
-
-    # Mock input to return '', 'hello' then 'exit'
-    mock_to_thread.side_effect = ["", "hello", "exit"]
-
-    config = local_connection.LocalAgentConfig(system_instructions="test")
-    async with agent.Agent(config) as ag:
-      with mock.patch("builtins.print") as mock_print:
-        await ag.run_interactive_loop()
-
-    mock_conversation.send.assert_called_once_with("hello")
-    mock_print.assert_any_call("Agent: Agent response")
-
-  @mock.patch(
-      "google.antigravity.connections."
-      "local.local_connection.LocalConnectionStrategy"
-  )
-  @mock.patch.object(conversation.Conversation, "create")
-  @mock.patch("asyncio.to_thread")
-  async def test_agent_run_interactive_loop_interrupt(
-      self, mock_to_thread, mock_conv_create, mock_strategy_class
-  ):
-    del mock_conv_create  # Unused.
-    mock_strategy_instance = mock.MagicMock()
-    mock_strategy_instance.stop = mock.AsyncMock()
-    mock_strategy_class.return_value = mock_strategy_instance
-
-    mock_to_thread.side_effect = KeyboardInterrupt()
-
-    config = local_connection.LocalAgentConfig(system_instructions="test")
-    async with agent.Agent(config) as ag:
-      with mock.patch("builtins.print") as mock_print:
-        await ag.run_interactive_loop()
-
-    mock_print.assert_any_call("\nGoodbye!")
-
-  @mock.patch(
-      "google.antigravity.connections."
-      "local.local_connection.LocalConnectionStrategy"
-  )
-  @mock.patch.object(conversation.Conversation, "create")
-  @mock.patch("asyncio.to_thread")
-  async def test_agent_run_interactive_loop_exception(
-      self, mock_to_thread, mock_conv_create, mock_strategy_class
-  ):
-    del mock_conv_create  # Unused.
-    mock_strategy_instance = mock.MagicMock()
-    mock_strategy_instance.stop = mock.AsyncMock()
-    mock_strategy_class.return_value = mock_strategy_instance
-
-    mock_to_thread.side_effect = [ValueError("Fail"), "exit"]
-
-    config = local_connection.LocalAgentConfig(system_instructions="test")
-    async with agent.Agent(config) as ag:
-      with mock.patch("builtins.print") as mock_print:
-        await ag.run_interactive_loop()
-
-    mock_print.assert_any_call("Error: Fail")
 
   @mock.patch(
       "google.antigravity.connections."

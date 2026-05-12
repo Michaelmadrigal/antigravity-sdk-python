@@ -14,14 +14,12 @@
 
 """Layer 1 API for Antigravity SDK."""
 
-import asyncio
 import contextlib
 import logging
 
 from google.antigravity import types
 from google.antigravity.connections import connection as connection_module
 from google.antigravity.conversation import conversation
-from google.antigravity.hooks import cli
 from google.antigravity.hooks import hook_runner
 from google.antigravity.hooks import hooks
 from google.antigravity.hooks import policy
@@ -204,38 +202,10 @@ class Agent:
       )
     return await self._conversation.chat(prompt)
 
-  async def run_interactive_loop(self):
-    """Runs an interactive CLI loop."""
-    if not self._conversation:
-      raise RuntimeError(
-          "Agent session not started. Use 'async with Agent(...)'."
-      )
-
-    assert self._hook_runner is not None
-    self._hook_runner.register_hook(cli.AskQuestionHook())
-    print("Starting interactive loop. Type 'exit' or 'quit' to end.")
-    while True:
-      try:
-        user_input = await asyncio.to_thread(input, "User: ")
-        user_input = user_input.strip()
-        if not user_input:
-          continue
-        if user_input.lower() in ("exit", "quit"):
-          print("Goodbye!")
-          break
-
-        await self._conversation.send(user_input)
-
-        async for step in self._conversation.receive_steps():
-          if step.is_complete_response:
-            print(f"Agent: {step.content}")
-
-      except (KeyboardInterrupt, EOFError):
-        print("\nGoodbye!")
-        break
-      except Exception as e:  # pylint: disable=broad-exception-caught
-        logging.exception("Error in interactive loop: %s", e)
-        print(f"Error: {e}")
+  @property
+  def is_started(self) -> bool:
+    """Whether the agent session has been started."""
+    return self._conversation is not None
 
   @property
   def connection(self) -> connection_module.Connection:

@@ -39,8 +39,8 @@ from absl import logging
 from google.antigravity import types
 from google.antigravity.agent import Agent
 from google.antigravity.connections.local.local_connection_config import LocalAgentConfig
-from google.antigravity.hooks import cli
 from google.antigravity.hooks import policy
+from google.antigravity.utils import interactive
 
 _MODEL_NAME = flags.DEFINE_string(
     "model_name", "gemini-3-flash-preview", "Gemini model name."
@@ -127,12 +127,14 @@ async def run():
 
     config = LocalAgentConfig(
         tools=[read_file_upside_down],
-        mcp_servers=[types.McpStdioServer(
-            command=mcp_server_path,
-            args=["--transport=stdio"],
-        )],
-        policies=[policy.ask_user("*", handler=cli.ask_user_handler)],
-        hooks=[cli.AskQuestionHook()],
+        mcp_servers=[
+            types.McpStdioServer(
+                command=mcp_server_path,
+                args=["--transport=stdio"],
+            )
+        ],
+        policies=[policy.ask_user("*", handler=interactive.ask_user_handler)],
+        hooks=[interactive.AskQuestionHook()],
         capabilities=types.CapabilitiesConfig(
             disabled_tools=(
                 [types.BuiltinTools.RUN_COMMAND]

@@ -19,8 +19,8 @@ from. They demonstrate the value of strongly typed predicates.
 """
 
 import pydantic
-from google.antigravity.hooks import cli
 from google.antigravity.hooks import policy
+from google.antigravity.utils import interactive
 
 
 class RunCommandArgs(pydantic.BaseModel):
@@ -74,6 +74,6 @@ ASK_FOR_CRITICAL_DELETES = policy.Policy(
     tool="delete_file",
     decision=policy.Decision.ASK_USER,
     when=_critical_file_predicate,
-    ask_user=cli.ask_user_handler,
+    ask_user=interactive.ask_user_handler,
     name="ask-for-critical-deletes",
 )
