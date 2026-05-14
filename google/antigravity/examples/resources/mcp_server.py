@@ -15,9 +15,15 @@
 """MCP server for pirate math."""
 
 import argparse
+import asyncio
+from collections.abc import AsyncIterator
+import contextlib
+import socket
 import sys
 from typing import Literal, Sequence
+
 from mcp.server.fastmcp import server
+import uvicorn
 
 Transport = Literal["stdio", "sse", "streamable-http"]
 
@@ -63,6 +69,55 @@ def _create_server(port: int) -> server.FastMCP:
 *Pirates triple the first, double the second, add the meaning of life!*"""
 
   return mcp
+
+
+def _find_available_port() -> int:
+  """Find an available port by letting the OS assign one."""
+  with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+    s.bind(("127.0.0.1", 0))
+    return s.getsockname()[1]
+
+
+@contextlib.asynccontextmanager
+async def run(transport: str) -> AsyncIterator[int]:
+  """Runs the MCP server in a background task and yields the port.
+
+  Usage::
+
+      async with mcp_server.run("streamable-http") as port:
+          url = f"http://localhost:{port}"
+          ...
+
+  Args:
+    transport: One of "sse" or "streamable-http".
+
+  Yields:
+    The port the server is listening on.
+  """
+  port = _find_available_port()
+  mcp = _create_server(port)
+
+  match transport:
+    case "sse":
+      starlette_app = mcp.sse_app()
+    case "streamable-http":
+      starlette_app = mcp.streamable_http_app()
+    case _:
+      raise ValueError(
+          f"Unsupported transport {transport!r}. "
+          "Use 'sse' or 'streamable-http'."
+      )
+
+  config = uvicorn.Config(
+      starlette_app, host=mcp.settings.host, port=port, log_level="warning"
+  )
+  uvicorn_server = uvicorn.Server(config)
+  task = asyncio.create_task(uvicorn_server.serve())
+  try:
+    yield port
+  finally:
+    uvicorn_server.should_exit = True
+    await task
 
 
 def main(argv: Sequence[str]) -> None:

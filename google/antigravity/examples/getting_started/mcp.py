@@ -24,6 +24,7 @@ import os
 from google.antigravity import agent
 from google.antigravity import types
 from google.antigravity.connections import local
+from google.antigravity.examples.resources import mcp_server
 
 
 async def mcp_stdio(mcp_server_path: str):
@@ -45,88 +46,36 @@ async def mcp_stdio(mcp_server_path: str):
     print(f"Agent: {await response.text()}")
 
 
-async def mcp_sse(mcp_server_path: str):
+async def mcp_sse():
   """Showcases the SSE transport."""
   print("\n--- Showcasing SSE Transport ---")
-  port = 8001
-  # Start MCP server in background
-  process = await asyncio.create_subprocess_exec(
-      "python3",
-      mcp_server_path,
-      f"--port={port}",
-      "--transport=sse",
-      stdout=asyncio.subprocess.PIPE,
-      stderr=asyncio.subprocess.STDOUT,
-  )
-  
-  # Wait for server to start
-  assert process.stdout is not None
-  while True:
-    line = await process.stdout.readline()
-    if not line:
-      break
-    line_str = line.decode("utf-8")
-    print(f"[SSE Server] {line_str.strip()}")
-    if "Uvicorn running on" in line_str:
-      break
+  async with mcp_server.run("sse") as port:
+    config = local.LocalAgentConfig(
+        mcp_servers=[types.McpSseServer(url=f"http://localhost:{port}/sse")]
+    )
 
-  config = local.LocalAgentConfig(
-      mcp_servers=[
-          types.McpSseServer(url=f"http://localhost:{port}/sse")
-      ]
-  )
-
-  try:
     async with agent.Agent(config) as my_agent:
       prompt = "Use the pirate_multiply tool to multiply 5 and 7."
       print(f"User: {prompt}")
       response = await my_agent.chat(prompt)
       print(f"Agent: {await response.text()}")
-  finally:
-    process.terminate()
-    await process.wait()
 
 
-async def mcp_http(mcp_server_path: str):
+async def mcp_http():
   """Showcases the Streamable HTTP transport."""
   print("\n--- Showcasing Streamable HTTP Transport ---")
-  port = 8002
-  # Start MCP server in background
-  process = await asyncio.create_subprocess_exec(
-      "python3",
-      mcp_server_path,
-      f"--port={port}",
-      "--transport=streamable-http",
-      stdout=asyncio.subprocess.PIPE,
-      stderr=asyncio.subprocess.STDOUT,
-  )
-  
-  # Wait for server to start
-  assert process.stdout is not None
-  while True:
-    line = await process.stdout.readline()
-    if not line:
-      break
-    line_str = line.decode("utf-8")
-    print(f"[HTTP Server] {line_str.strip()}")
-    if "Uvicorn running on" in line_str:
-      break
+  async with mcp_server.run("streamable-http") as port:
+    config = local.LocalAgentConfig(
+        mcp_servers=[
+            types.McpStreamableHttpServer(url=f"http://localhost:{port}/mcp")
+        ]
+    )
 
-  config = local.LocalAgentConfig(
-      mcp_servers=[
-          types.McpStreamableHttpServer(url=f"http://localhost:{port}/mcp")
-      ]
-  )
-
-  try:
     async with agent.Agent(config) as my_agent:
       prompt = "Use the pirate_multiply tool to multiply 5 and 7."
       print(f"User: {prompt}")
       response = await my_agent.chat(prompt)
       print(f"Agent: {await response.text()}")
-  finally:
-    process.terminate()
-    await process.wait()
 
 
 async def main() -> None:
@@ -141,8 +90,8 @@ async def main() -> None:
     return
 
   await mcp_stdio(mcp_server_path)
-  await mcp_sse(mcp_server_path)
-  await mcp_http(mcp_server_path)
+  await mcp_sse()
+  await mcp_http()
 
 
 if __name__ == "__main__":

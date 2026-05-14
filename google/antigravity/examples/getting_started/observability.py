@@ -65,7 +65,7 @@ async def main() -> None:
     print()
 
     # Access token usage
-    usage = my_agent.total_usage
+    usage = my_agent.conversation.total_usage
     print("\n--- Token Usage ---")
     print(f"Prompt tokens: {usage.prompt_token_count}")
     print(f"Output tokens: {usage.candidates_token_count}")
