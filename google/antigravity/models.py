@@ -100,7 +100,7 @@ class GeminiAPIEndpoint(ModelEndpoint):
       raise ValueError(
           "A Gemini API key is required. Set it via"
           " GEMINI_API_KEY environment variable or via"
-          " LocalAgentConfig(api_key=...) or"
+          " LocalAgentConfig(api_key=...)."
       )
 
 
